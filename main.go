@@ -101,22 +101,7 @@ func main() {
 		}
 		currentBranch = gitOut(target, "symbolic-ref", "--short", "-q", "HEAD")
 		if currentBranch != branch {
-			rebaseMerge := gitOut(target, "rev-parse", "--git-path", "rebase-merge")
-			rebaseApply := gitOut(target, "rev-parse", "--git-path", "rebase-apply")
-			if isDir(rebaseMerge) || isDir(rebaseApply) {
-				fmt.Fprintf(os.Stderr, "tdev: cannot switch branch while rebase is in progress: %s\n", target)
-				fmt.Fprintf(os.Stderr, "tdev: run git -C \"%s\" rebase --continue or git -C \"%s\" rebase --abort\n", target, target)
-				os.Exit(1)
-			}
-			if gitOK(target, "show-ref", "--verify", "--quiet", "refs/heads/"+branch) {
-				if err := run("git", "-C", target, "switch", branch); err != nil {
-					os.Exit(1)
-				}
-			} else {
-				if err := run("git", "-C", target, "switch", "-c", branch); err != nil {
-					os.Exit(1)
-				}
-			}
+			target = ensureWorktree(target, branch)
 		}
 		currentBranch = branch
 	} else {
@@ -147,4 +132,74 @@ func isDir(p string) bool {
 	}
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
+}
+
+// ensureWorktree returns the path of a git worktree for branch, creating it if
+// needed under <repo>-worktrees/<sanitized-branch> next to the repo root.
+func ensureWorktree(target, branch string) string {
+	root := gitOut(target, "rev-parse", "--show-toplevel")
+	if root == "" {
+		root = target
+	}
+
+	// If target already is the worktree for branch, reuse it.
+	if gitOut(target, "symbolic-ref", "--short", "-q", "HEAD") == branch {
+		return target
+	}
+
+	// Reuse an existing worktree already checked out on branch.
+	if wt := worktreeForBranch(target, branch); wt != "" {
+		return wt
+	}
+
+	dir := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-worktrees", sanitizeBranch(branch))
+	if isDir(filepath.Join(dir, ".git")) || isFile(filepath.Join(dir, ".git")) {
+		return dir
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		die("tdev: failed to create worktree parent dir: %v", err)
+	}
+
+	var args []string
+	if gitOK(target, "show-ref", "--verify", "--quiet", "refs/heads/"+branch) {
+		args = []string{"-C", root, "worktree", "add", dir, branch}
+	} else {
+		args = []string{"-C", root, "worktree", "add", "-b", branch, dir}
+	}
+	if err := run("git", args...); err != nil {
+		die("tdev: failed to create worktree for branch %s", branch)
+	}
+	return dir
+}
+
+func worktreeForBranch(target, branch string) string {
+	out := gitOut(target, "worktree", "list", "--porcelain")
+	if out == "" {
+		return ""
+	}
+	ref := "refs/heads/" + branch
+	var path string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "branch "):
+			if strings.TrimPrefix(line, "branch ") == ref && isDir(path) {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+func sanitizeBranch(branch string) string {
+	return strings.ReplaceAll(branch, "/", "-")
+}
+
+func isFile(p string) bool {
+	if p == "" {
+		return false
+	}
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
