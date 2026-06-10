@@ -56,6 +56,11 @@ func gitOut(target string, args ...string) string {
 func main() {
 	tmux := findTmux()
 
+	if arg(1) == "close" {
+		closeWindow(tmux, arg(2))
+		return
+	}
+
 	name := arg(1)
 	if name == "" {
 		name = "dev"
@@ -124,6 +129,43 @@ func main() {
 	run(tmux, "send-keys", "-t", left, "proxy && opencode", "C-m")
 	run(tmux, "send-keys", "-t", right, "lazygit", "C-m")
 	run(tmux, "select-pane", "-t", left)
+}
+
+func closeWindow(tmux, branch string) {
+	if branch == "" {
+		if err := run(tmux, "kill-window"); err != nil {
+			die("tdev: failed to close current window: %v", err)
+		}
+		return
+	}
+
+	out, err := capture(tmux, "list-windows", "-F", "#{window_id} #{window_name}")
+	if err != nil {
+		die("tdev: failed to list windows: %v", err)
+	}
+
+	matched := false
+	for _, line := range strings.Split(out, "\n") {
+		id, wname, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		if branchOfWindow(wname) == branch {
+			matched = true
+			run(tmux, "kill-window", "-t", id)
+		}
+	}
+	if !matched {
+		die("tdev: no window found for worktree: %s", branch)
+	}
+}
+
+func branchOfWindow(windowName string) string {
+	i := strings.Index(windowName, "[")
+	if i < 0 || !strings.HasSuffix(windowName, "]") {
+		return ""
+	}
+	return windowName[i+1 : len(windowName)-1]
 }
 
 func isDir(p string) bool {
