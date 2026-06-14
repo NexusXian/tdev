@@ -23,7 +23,12 @@ Opens a new tmux window split into two panes: left runs `proxy && opencode`, rig
 ## Close
 
 ```
-tdev close [branch]
+tdev close [branch] [-d|-D]
 ```
 
 Closes the tmux window whose name matches `name[branch]` by its `branch` part. Without `branch`, closes the current window.
+
+- `-d` also remove the branch's git worktree and delete the branch (safe: aborts if the worktree has uncommitted changes or the branch is unmerged)
+- `-D` same as `-d` but forced (`git worktree remove --force`, `git branch -D`)
+
+Without a `branch`, `-d`/`-D` operate on the current window's worktree.

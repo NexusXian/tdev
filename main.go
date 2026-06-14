@@ -57,7 +57,8 @@ func main() {
 	tmux := findTmux()
 
 	if arg(1) == "close" {
-		closeWindow(tmux, arg(2))
+		removeWT, force, branch := parseCloseArgs(os.Args[2:])
+		closeWindow(tmux, branch, removeWT, force)
 		return
 	}
 
@@ -131,7 +132,27 @@ func main() {
 	run(tmux, "select-pane", "-t", left)
 }
 
-func closeWindow(tmux, branch string) {
+func parseCloseArgs(args []string) (removeWT, force bool, branch string) {
+	for _, a := range args {
+		switch a {
+		case "-d":
+			removeWT = true
+		case "-D":
+			removeWT, force = true, true
+		default:
+			if branch == "" {
+				branch = a
+			}
+		}
+	}
+	return
+}
+
+func closeWindow(tmux, branch string, removeWT, force bool) {
+	if removeWT {
+		removeWorktree(tmux, branch, force)
+	}
+
 	if branch == "" {
 		if err := run(tmux, "kill-window"); err != nil {
 			die("tdev: failed to close current window: %v", err)
@@ -158,6 +179,65 @@ func closeWindow(tmux, branch string) {
 	if !matched {
 		die("tdev: no window found for worktree: %s", branch)
 	}
+}
+
+// removeWorktree resolves the worktree for branch (or the current pane's
+// branch when branch is empty), removes it, and deletes the branch.
+func removeWorktree(tmux, branch string, force bool) {
+	cur, err := capture(tmux, "display-message", "-p", "#{pane_current_path}")
+	if err != nil || cur == "" {
+		die("tdev: failed to get current pane path: %v", err)
+	}
+	if !gitOK(cur, "rev-parse", "--is-inside-work-tree") {
+		die("tdev: not inside a git repository: %s", cur)
+	}
+
+	if branch == "" {
+		branch = gitOut(cur, "symbolic-ref", "--short", "-q", "HEAD")
+		if branch == "" {
+			die("tdev: cannot determine branch of current window")
+		}
+	}
+
+	wt := worktreeForBranch(cur, branch)
+	if wt == "" {
+		die("tdev: no worktree found for branch: %s", branch)
+	}
+
+	root := mainWorktreeRoot(cur)
+	if root == "" {
+		die("tdev: failed to locate main worktree")
+	}
+	if wt == root {
+		die("tdev: refusing to remove the main worktree: %s", wt)
+	}
+
+	rmArgs := []string{"-C", root, "worktree", "remove", wt}
+	if force {
+		rmArgs = []string{"-C", root, "worktree", "remove", "--force", wt}
+	}
+	if err := run("git", rmArgs...); err != nil {
+		die("tdev: failed to remove worktree %s (use -D to force)", wt)
+	}
+
+	delFlag := "-d"
+	if force {
+		delFlag = "-D"
+	}
+	if err := run("git", "-C", root, "branch", delFlag, branch); err != nil {
+		fmt.Fprintf(os.Stderr, "tdev: worktree removed but branch %s not deleted (use -D to force)\n", branch)
+	}
+}
+
+// mainWorktreeRoot returns the path of the primary (first) worktree.
+func mainWorktreeRoot(target string) string {
+	out := gitOut(target, "worktree", "list", "--porcelain")
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			return strings.TrimPrefix(line, "worktree ")
+		}
+	}
+	return ""
 }
 
 func branchOfWindow(windowName string) string {
