@@ -62,18 +62,13 @@ func main() {
 		return
 	}
 
-	name := arg(1)
-	if name == "" {
-		name = "dev"
-	}
-
 	cur, err := capture(tmux, "display-message", "-p", "#{pane_current_path}")
 	if err != nil {
 		die("tdev: failed to get current pane path: %v", err)
 	}
 
+	branch := arg(1)
 	dirArg := arg(2)
-	branch := arg(3)
 
 	var target string
 	switch {
@@ -114,9 +109,9 @@ func main() {
 		currentBranch = gitOut(target, "symbolic-ref", "--short", "-q", "HEAD")
 	}
 
-	windowName := name
-	if currentBranch != "" {
-		windowName = fmt.Sprintf("%s[%s]", name, currentBranch)
+	windowName := currentBranch
+	if windowName == "" {
+		windowName = "dev"
 	}
 
 	left, err := capture(tmux, "new-window", "-P", "-F", "#{pane_id}", "-n", windowName, "-c", target)
@@ -171,7 +166,7 @@ func closeWindow(tmux, branch string, removeWT, force bool) {
 		if !ok {
 			continue
 		}
-		if branchOfWindow(wname) == branch {
+		if wname == branch {
 			matched = true
 			run(tmux, "kill-window", "-t", id)
 		}
@@ -238,14 +233,6 @@ func mainWorktreeRoot(target string) string {
 		}
 	}
 	return ""
-}
-
-func branchOfWindow(windowName string) string {
-	i := strings.Index(windowName, "[")
-	if i < 0 || !strings.HasSuffix(windowName, "]") {
-		return ""
-	}
-	return windowName[i+1 : len(windowName)-1]
 }
 
 func isDir(p string) bool {
