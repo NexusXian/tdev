@@ -201,7 +201,7 @@ func removeWorktree(tmux, branch string, force bool) {
 
 	wt := worktreeForBranch(cur, branch)
 	if wt == "" {
-		die("tdev: no worktree found for branch: %s", branch)
+		return
 	}
 
 	root := mainWorktreeRoot(cur)
