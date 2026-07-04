@@ -69,18 +69,14 @@ func main() {
 
 	branch := arg(1)
 	dirArg := arg(2)
-
-	var target string
-	switch {
-	case dirArg == "":
-		target = cur
-	case strings.HasPrefix(dirArg, "/"):
-		target = dirArg
-	case strings.HasPrefix(dirArg, "~"):
-		target = filepath.Join(os.Getenv("HOME"), dirArg[1:])
-	default:
-		target = filepath.Join(cur, dirArg)
+	if arg(3) != "" {
+		branch = arg(3)
+	} else if branch != "" && dirArg != "" && strings.Contains(dirArg, "/") && !isDir(resolveTarget(cur, dirArg)) {
+		branch = dirArg
+		dirArg = ""
 	}
+
+	target := resolveTarget(cur, dirArg)
 
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		die("tdev: not a directory: %s", target)
@@ -122,6 +118,9 @@ func main() {
 	if err != nil {
 		die("tdev: failed to split window: %v", err)
 	}
+	if _, err := capture(tmux, "split-window", "-v", "-t", right, "-l", "20%", "-P", "-F", "#{pane_id}", "-c", target); err != nil {
+		die("tdev: failed to split lazygit pane: %v", err)
+	}
 	run(tmux, "send-keys", "-t", left, "proxy && opencode", "C-m")
 	run(tmux, "send-keys", "-t", right, "lazygit", "C-m")
 	run(tmux, "select-pane", "-t", left)
@@ -141,6 +140,19 @@ func parseCloseArgs(args []string) (removeWT, force bool, branch string) {
 		}
 	}
 	return
+}
+
+func resolveTarget(cur, dirArg string) string {
+	switch {
+	case dirArg == "":
+		return cur
+	case strings.HasPrefix(dirArg, "/"):
+		return dirArg
+	case strings.HasPrefix(dirArg, "~"):
+		return filepath.Join(os.Getenv("HOME"), dirArg[1:])
+	default:
+		return filepath.Join(cur, dirArg)
+	}
 }
 
 func closeWindow(tmux, branch string, removeWT, force bool) {
